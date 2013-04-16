@@ -36,7 +36,7 @@ var HGraph = function(opts) {
 	this.container        = opts.container || null;
 	this.context          = null;
 	this.width            = opts.width || 0;
-	this.height           = opts.height || 0;
+	this.hheight           = opts.height || 0;
 	this.rotation         = opts.rotation || 0;
 	this.zoomFactor       = opts.zoomFactor || 2.2;
 	this.zoomTime         = opts.zoomTime || 800;
@@ -88,7 +88,7 @@ HGraph.prototype.initialize = function() {
 	this.height     = this.height || this.container.offsetHeight;
 	this.halfWidth  = this.width / 2;
 	this.halfHeight = this.height / 2;
-
+	console.log(this.width + " " + this.height);
 	this.showLabels = ((this.width / this.height) > 1.2);
 
 	this.scaleRange = this.showLabels ?
@@ -210,6 +210,70 @@ HGraph.prototype.initialize = function() {
 	});
 
 };
+
+/**
+ *  Function: HGraph.calculateScoreFromValue
+ *     calculates score based on metrics
+ *
+ *  Arguments:
+ *      features - *(JSON)* Contains the features to be measured against
+ *      myValue - *(number)* Number to compare to features
+ */
+HGraph.prototype.calculateScoreFromValue = function (features, myValue){
+	var maxHealthyValue = features.healthyrange[1];
+	var minHealthyValue = features.healthyrange[0];
+	var maxAcceptableValue = features.totalrange[1];
+	var minAcceptableValue = features.totalrange[0];
+	
+	if(myValue <= maxHealthyValue && myValue >= minHealthyValue){
+		//calculate if we are in healthy range 
+		var healthyRangeMidPoint = (minHealthyValue + maxHealthyValue)/2;
+		//This value will have a score of 100.
+		var healthyHalfRange = (maxHealthyValue - minHealthyValue) / 2;
+		//This defines the slope of the curve in the healthy range
+		var score = 100 - (30 / healthyHalfRange) * (abs(myValue - healthyRangeMidPoint));
+
+		if(maxHealthyValue == maxAcceptableValue){
+			//Our graph is clamped on the right side
+			if(myValue>healthyRangeMidPoint){
+				score=100;
+			}
+		}
+		if(minHealthyValue == minAcceptableValue){
+			//our graph is clamped on the left side.
+			if(myValue> healthyRangeMidPoint){
+				score=100;
+			}
+		}
+		return score;
+	}
+	else{
+		//We are outside the healthy range.
+		if(myValue > maxHealthyRange){
+			//We are on the high side
+			var highRange = (maxAcceptableValue - maxHealthyValue);
+			score = 100 + (70/highRange)*(myValue - maxHealthyValue);
+			//Note that this means we will get a value of up to 170 on the hGraph.
+			//This is likely to be problematic because it will have a tendancy to make people's hScore super low
+			//In the case where the healthy region is almost equal to the maxAcceptableValue and the patient
+			//Is just outside the healthyRange
+			//For now, maybe we should go with it until we figure out the exact scales we want to use for the hGraph.
+
+			//This will show points that are high outside of the green circle. If we just want to get a 0-100 for everything:
+			//score = 70 - (70/highRange)*(myValue-maxHealthyValue);
+
+			return score;
+		}
+		else{
+			//We are on the low side
+			var lowRange = (minHealthyValue - minAcceptableValue);
+			score  = 70 - (70/lowRange)*(myValue - minAcceptableValue);
+			//This means we will get down to 0.
+			return score;
+		}
+
+	}
+}
 
 /**
  *  Function: HGraph.zoomIn
@@ -663,29 +727,20 @@ HGraph.prototype.updateWeb = function(animated, forceZoomedState, revertToOrigin
 };
 
 HGraph.prototype.calculateHealthScore = function(){
-	//For now, let's just do a simple mean.
+	//V0.3 of hScore Algorithm.
 	if(this.userdata && this.userdata.factors){
-		var sum=0, num=0,factor, goodSum = 0, goodNum=0, badNum=0, badSum = 0;
-		var meanGood = (this.healthRange.lower + this.healthRange.upper)/2.0;
+		var numPoints = this.userdata.factors.length;
+		var idealValue = (this.healthRange.lower + this.healthRange.upper)/2.0;
+		var widthGood = this.healthRange.upper - this.healthRange.lower;
+		var factor, sumSquares=0;
 		for(factor in this.userdata.factors){
 			var score = this.userdata.factors[factor].score;
-			if(score > this.healthRange.lower && score < this.healthRange.upper){
-				goodSum = goodSum + Math.pow(Math.abs(score-meanGood),2);
-				goodNum = goodNum + 1;
-			}
-			else{
-				badSum = badSum + Math.pow(Math.abs(score-meanGood),2);
-				badNum = badNum + 1;
-			}
-			num = num + 1;
+			sumSquares = sumSquares + Math.pow(idealValue - score,2);
 		}
-		if(num > 0){
-			var goodStd = Math.pow(goodSum/goodNum,0.5) || 0;
-			var badStd = Math.pow(badSum/badNum,0.5) || 0;
-
-			//we don't want to divide by 0;
-			return parseInt(100 - (0.5*(goodNum*goodStd)+2*(badStd*badNum))/num);
-		}
+		// console.log('idealValue='+idealValue);
+		// console.log('numPoints='+numPoints);
+		// console.log('sumSquares='+sumSquares);
+		return parseInt(100-(100/(Math.pow(idealValue,2)*numPoints))*sumSquares);
 	}
 	return 50;
 };
